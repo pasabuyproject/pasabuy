@@ -11,9 +11,10 @@ function persist(t){
   else fs.writeFileSync(F,t);
 }
 const server=http.createServer((q,r)=>{
+  if(q.url==='/api/health'){let c=0;try{c=JSON.parse(cache).users.length}catch(e){}r.writeHead(200,{'Content-Type':'application/json'});return r.end(JSON.stringify({storage:pool?'database':'file (lost when the server sleeps)',hasData:!!cache,accounts:c}))}
   if(q.url.startsWith('/api/db')){
     if(q.method==='GET'){r.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});return r.end(cache||'null')}
-    if(q.method==='PUT'){let b=[],n=0;q.on('data',c=>{n+=c.length;if(n>MAX){r.writeHead(413);r.end('too big');q.destroy()}else b.push(c)});q.on('end',()=>{if(n>MAX)return;try{const t=Buffer.concat(b).toString();JSON.parse(t);cache=t;persist(t);r.writeHead(200);r.end('ok')}catch(e){r.writeHead(400);r.end('bad')}});return}
+    if(q.method==='PUT'){let b=[],n=0;q.on('data',c=>{n+=c.length;if(n>MAX){r.writeHead(413);r.end('too big');q.destroy()}else b.push(c)});q.on('end',()=>{if(n>MAX)return;try{let t=Buffer.concat(b).toString();const inc=JSON.parse(t);if(cache){try{const old=JSON.parse(cache);['users','trips','requests','orders','reviews'].forEach(k=>{inc[k]=inc[k]||[];const kf=x=>x.id||x.orderId+':'+x.by,have=new Set(inc[k].map(kf));(old[k]||[]).forEach(x=>{if(!have.has(kf(x)))inc[k].push(x)})});t=JSON.stringify(inc)}catch(e){}}cache=t;persist(t);r.writeHead(200);r.end('ok')}catch(e){r.writeHead(400);r.end('bad')}});return}
   }
   if(q.url==='/'||q.url.startsWith('/?')){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return r.end(fs.readFileSync(H))}
   r.writeHead(404);r.end('Not found');
