@@ -1,6 +1,6 @@
 const http=require('http'),fs=require('fs'),path=require('path'),os=require('os');
 const F=path.join(__dirname,'data.json'),H=path.join(__dirname,'pasabuy_marketplace.html'),PORT=process.env.PORT||3000,MAX=25*1024*1024;
-let cache=null,pool=null;
+let cache=null,pool=null,ver=Date.now();
 if(process.env.DATABASE_URL){const {Pool}=require('pg');pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false}})}
 async function load(){
   if(pool){await pool.query('create table if not exists kv(k text primary key, v text)');const r=await pool.query("select v from kv where k='db'");cache=r.rows[0]?r.rows[0].v:null}
@@ -12,11 +12,12 @@ function persist(t){
 }
 const server=http.createServer((q,r)=>{
   if(q.url==='/api/health'){let c=0;try{c=JSON.parse(cache).users.length}catch(e){}r.writeHead(200,{'Content-Type':'application/json'});return r.end(JSON.stringify({storage:pool?'database':'file (lost when the server sleeps)',hasData:!!cache,accounts:c}))}
+  if(q.url.startsWith('/api/ver')){r.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'});return r.end(String(ver))}
   if(q.url.startsWith('/api/db')){
-    if(q.method==='GET'){r.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});return r.end(cache||'null')}
-    if(q.method==='PUT'){let b=[],n=0;q.on('data',c=>{n+=c.length;if(n>MAX){r.writeHead(413);r.end('too big');q.destroy()}else b.push(c)});q.on('end',()=>{if(n>MAX)return;try{let t=Buffer.concat(b).toString();const inc=JSON.parse(t);if(cache){try{const old=JSON.parse(cache);['users','trips','requests','orders','reviews'].forEach(k=>{inc[k]=inc[k]||[];const kf=x=>x.id||x.orderId+':'+x.by,have=new Set(inc[k].map(kf));(old[k]||[]).forEach(x=>{if(!have.has(kf(x)))inc[k].push(x)})});t=JSON.stringify(inc)}catch(e){}}cache=t;persist(t);r.writeHead(200);r.end('ok')}catch(e){r.writeHead(400);r.end('bad')}});return}
+    if(q.method==='GET'){r.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store','X-Ver':String(ver)});return r.end(cache||'null')}
+    if(q.method==='PUT'){let b=[],n=0;q.on('data',c=>{n+=c.length;if(n>MAX){r.writeHead(413);r.end('too big');q.destroy()}else b.push(c)});q.on('end',()=>{if(n>MAX)return;try{let t=Buffer.concat(b).toString();const inc=JSON.parse(t);let added=false;if(cache){try{const old=JSON.parse(cache);['users','trips','requests','orders','reviews'].forEach(k=>{inc[k]=inc[k]||[];const kf=x=>x.id||x.orderId+':'+x.by,have=new Set(inc[k].map(kf));(old[k]||[]).forEach(x=>{if(!have.has(kf(x))){inc[k].push(x);added=true}})});t=JSON.stringify(inc)}catch(e){}}cache=t;persist(t);ver=Math.max(ver+1,Date.now());r.writeHead(200,{'Content-Type':'application/json'});r.end(JSON.stringify({v:String(ver),m:added}))}catch(e){r.writeHead(400);r.end('bad')}});return}
   }
-  if(q.url==='/'||q.url.startsWith('/?')){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return r.end(fs.readFileSync(H))}
+  if(q.url==='/'||q.url.startsWith('/?')){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'});return r.end(fs.readFileSync(H))}
   r.writeHead(404);r.end('Not found');
 });
 load().catch(e=>console.error('Could not load saved data:',e.message)).then(()=>server.listen(PORT,'0.0.0.0',()=>{
