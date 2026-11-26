@@ -28,7 +28,7 @@
 </aside>
 <main class="main" id="main"></main>
 </div>
-<div class="footer">Pasabuy · A classroom marketplace prototype · No real payments, identity checks, or bookings are processed. · <a href="#" onclick="openLegal('terms');return false">Terms</a> · <a href="#" onclick="openLegal('privacy');return false">Privacy</a> · Version 26 Nov 2026 (b)</div>
+<div class="footer">Pasabuy · A classroom marketplace prototype · No real payments, identity checks, or bookings are processed. · <a href="#" onclick="openLegal('terms');return false">Terms</a> · <a href="#" onclick="openLegal('privacy');return false">Privacy</a> · Version 26 Nov 2026 (c)</div>
 </div>
 <div class="modal-back" id="modalBack"><div class="modal"><div class="modal-head"><h2 id="modalTitle">Create</h2><button class="x" onclick="closeModal()">×</button></div><div id="modalContent"></div></div></div>
 <script>
@@ -49,11 +49,11 @@ const seed={
  ],
  disputes:[],reviews:[]
 };
-const API=/^https?:$/.test(location.protocol)?'/api/db':null;let lastTxt='';
-function pull(){try{const x=new XMLHttpRequest();x.open('GET',API,false);x.send();if(x.status===200&&x.responseText&&x.responseText!=='null'){lastTxt=x.responseText;return JSON.parse(x.responseText)}}catch(e){}return null}
+const API=/^https?:$/.test(location.protocol)?'/api/db':null;let lastTxt='',lastVer=null;
+function pull(){try{const x=new XMLHttpRequest();x.open('GET',API,false);x.send();if(x.status===200&&x.responseText&&x.responseText!=='null'){lastTxt=x.responseText;lastVer=x.getResponseHeader('X-Ver');return JSON.parse(x.responseText)}}catch(e){}return null}
 let db;try{db=(API&&pull())||JSON.parse(localStorage.getItem('habiDB2'))||seed}catch(e){db=seed}
 let role='buyer',page='home',activeOrder=5001;
-function save(){if(API){const sv=pull();if(sv){['trips','requests','orders','users','reviews'].forEach(k=>{db[k]=db[k]||[];const kf=x=>x.id||x.orderId+':'+x.by,have=new Set(db[k].map(kf));(sv[k]||[]).forEach(x=>{if(!have.has(kf(x)))db[k].push(x)})});db.saved=Object.assign({},sv.saved||{},db.saved||{})}}const t=JSON.stringify(db);try{localStorage.setItem('habiDB2',t)}catch(e){}if(API){try{const x=new XMLHttpRequest();x.open('PUT',API,false);x.setRequestHeader('Content-Type','application/json');x.send(t);if(x.status===200)lastTxt=t;else toast('Could not save to the server. Check your connection.')}catch(e){}}}
+function save(){if(API){let v=null;try{const x=new XMLHttpRequest();x.open('GET','/api/ver',false);x.send();if(x.status===200)v=x.responseText.trim()}catch(e){}if(v===null||v!==lastVer){const sv=pull();if(sv){['trips','requests','orders','users','reviews'].forEach(k=>{db[k]=db[k]||[];const kf=x=>x.id||x.orderId+':'+x.by,have=new Set(db[k].map(kf));(sv[k]||[]).forEach(x=>{if(!have.has(kf(x)))db[k].push(x)})});db.saved=Object.assign({},sv.saved||{},db.saved||{})}}}const t=JSON.stringify(db);try{localStorage.setItem('habiDB2',t)}catch(e){}if(API){try{const x=new XMLHttpRequest();x.open('PUT',API,false);x.setRequestHeader('Content-Type','application/json');x.send(t);if(x.status===200){try{const j=JSON.parse(x.responseText);lastVer=j.m?null:j.v}catch(e){lastVer=null}lastTxt=t}else toast('Could not save to the server. Check your connection.')}catch(e){}}}
 function navItems(){return role==='buyer'?[['home','Discover trips'],['requests','My requests'],['orders','My orders'],['saved','Saved travelers']]:role==='traveler'?[['home','Explore requests'],['trips','My trips'],['orders','My deliveries'],['earnings','Earnings']]:[['overview','Overview'],['disputes','Disputes'],['safety','Safety rules'],['analytics','Analytics']]}
 function setRole(r){role=r;page=navItems()[0][0];$('#roleSwitch').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.role===r));$('#sideRole').textContent=r[0].toUpperCase()+r.slice(1)+' account';$('#sideName').textContent=r==='buyer'?ME():r==='traveler'?ME():'Pasabuy Admin';$('#avatar').textContent=r==='buyer'?'M':r==='traveler'?'A':'H';$('#sideAvatar').textContent=$('#avatar').textContent;render()}
 $('#roleSwitch').addEventListener('click',e=>{let b=e.target.closest('button[data-role]');if(b)setRole(b.dataset.role)});
@@ -212,6 +212,13 @@ render();
 document.addEventListener('input',e=>{if(['calcItem','calcWeight','calcFee','calcShip'].includes(e.target.id)){let item=+($('#calcItem').value||0),fee=+($('#calcFee').value||0),ship=+($('#calcShip').value||0),pasabuy=item+fee+Math.round((item+fee)*.06),direct=item+ship,saving=direct-pasabuy;$('#calcPasabuy').textContent='₱'+pasabuy.toLocaleString();$('#calcDirect').textContent='₱'+direct.toLocaleString();$('#calcResult').textContent=saving>=0?'Estimated savings: ₱'+saving.toLocaleString()+'. Actual costs may vary.':'Estimated pasabuy is ₱'+Math.abs(saving).toLocaleString()+' more than direct shipping. Actual costs may vary.';}});
 document.addEventListener('input',e=>{if(!['calcItem','calcWeight','calcFee','calcShip'].includes(e.target.id))return;const w=+($('#calcWeight').value||0),p=parseInt($('#calcPasabuy').textContent.replace(/[^\d]/g,''))||0;if(w>0)$('#calcResult').textContent+=' Pasabuy works out to about ₱'+Math.round(p/w).toLocaleString()+' per kg.'});
 if(API&&!lastTxt)save();
-setInterval(()=>{if(!API||document.hidden)return;fetch(API,{cache:'no-store'}).then(r=>r.text()).then(t=>{if(!t||t==='null'||t===lastTxt)return;lastTxt=t;db=JSON.parse(t);if(currentUser)currentUser=db.users.find(u=>u.id===currentUser.id&&u.status==='active')||null;if(!$('#modalBack').classList.contains('show')){syncAuthUI();render()}}).catch(()=>{})},2500);
+let stale=false,polling=false;
+function applyRemote(t,nv){lastVer=nv;lastTxt=t;const open=$('#modalBack').classList.contains('show'),mc=$('#modalContent'),isOrder=open&&activeOrder&&mc.textContent.includes('Price breakdown'),snap=()=>JSON.stringify((db.orders||[]).find(o=>o.id===activeOrder)||null),before=isOrder?snap():null;
+db=JSON.parse(t);if(currentUser)currentUser=db.users.find(u=>u.id===currentUser.id&&u.status==='active')||null;
+if(open){stale=true;if(isOrder&&snap()!==before){const keep={};['chatInput','otpInput'].forEach(i=>{const e=$('#'+i);if(e)keep[i]=e.value});const par=mc.parentElement,y1=par?par.scrollTop:0,y2=mc.scrollTop;openOrder(activeOrder);for(const i in keep){const e=$('#'+i);if(e)e.value=keep[i]}const p2=mc.parentElement;if(p2)p2.scrollTop=y1;mc.scrollTop=y2}}
+else{const y=window.scrollY;syncAuthUI();render();window.scrollTo(0,y)}}
+async function poll(){if(!API||polling||document.hidden)return;polling=true;try{const r=await fetch('/api/ver',{cache:'no-store'}),v=(await r.text()).trim();if(r.ok&&v&&v!==lastVer){const d=await fetch(API,{cache:'no-store'}),t=await d.text();if(d.ok&&t&&t!=='null')applyRemote(t,d.headers.get('X-Ver'))}}catch(e){}polling=false}
+setInterval(poll,1500);document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});window.addEventListener('focus',poll);
+const _cm=closeModal;closeModal=function(){_cm();if(stale){stale=false;const y=window.scrollY;syncAuthUI();render();window.scrollTo(0,y)}};
 </script>
 </body></html>
